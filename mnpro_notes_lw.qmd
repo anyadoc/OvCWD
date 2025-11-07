@@ -1,0 +1,378 @@
+---
+title: "mnpro_notes_LW"
+format: html
+editor: visual
+---
+
+## MNPRO Notes
+
+1.  objective is to compare the deer that were sampled for CWD in leech lake and white earth to the model outputs.
+    1.  Link to sample done in leech lake and white earth -\><https://github.com/anyadoc/WELLOvCWD/blob/main/Deer%20Harvest%20and%20Population%20Reports/CWD%20Surveillance%20Data.csv>
+
+Summarized CWD testing for each age sex class from model outputs
+
+```{r}
+# Load necessary libraries
+library(readr)
+
+# Read the CSV file
+data <- read_csv("C:/Users/lrw0046/Downloads/cwdinfdyDPA197_seedinf_1.csv")
+
+# Calculate the average for each tested column and round to nearest whole number
+avg_adult_male_tested <- round(mean(data$AdultMaleTested, na.rm = TRUE))
+avg_yearling_male_tested <- round(mean(data$YearlingMaleTested, na.rm = TRUE))
+avg_fawn_male_tested <- round(mean(data$FawnMaleTested, na.rm = TRUE))
+avg_adult_female_tested <- round(mean(data$AdultFemaleTested, na.rm = TRUE))
+avg_yearling_female_tested <- round(mean(data$YearlingFemaleTested, na.rm = TRUE))
+avg_fawn_female_tested <- round(mean(data$FawnFemaleTested, na.rm = TRUE))
+
+# Create a data frame with the results
+results <- data.frame(
+  Category = c("Adult Male Tested", "Yearling Male Tested", "Fawn Male Tested",
+               "Adult Female Tested", "Yearling Female Tested", "Fawn Female Tested"),
+  Average = c(avg_adult_male_tested, avg_yearling_male_tested, avg_fawn_male_tested,
+              avg_adult_female_tested, avg_yearling_female_tested, avg_fawn_female_tested)
+)
+
+# Write the data frame to a CSV file
+write_csv(results, "C:/Users/lrw0046/Downloads/average_tested_deer_model.csv")
+
+print("average_tested_deer_model.csv")
+```
+
+**Compare average from model data to data provided by Tiffany**
+
+-   Model average is referred to as Model_average and data provided by Tiffany is referred to as Surveillance_average in the table.
+
+-   Differences are provided both numerically and percentage wise between model data and surveillance data
+
+```{r}
+# Load necessary library
+library(dplyr)
+
+# Hardcode the model averages from average_tested_deer.csv
+model_averages <- data.frame(
+  Category = c("Adult Male Tested", "Yearling Male Tested", "Fawn Male Tested",
+               "Adult Female Tested", "Yearling Female Tested", "Fawn Female Tested"),
+  Model_Average = c(50, 45, 3, 25, 14, 4)
+)
+
+# Hardcode the surveillance averages (calculated per year from the provided data)
+surveillance_averages <- data.frame(
+  Category = c("Adult Male Tested", "Yearling Male Tested", "Fawn Male Tested",
+               "Adult Female Tested", "Yearling Female Tested", "Fawn Female Tested"),
+  Surveillance_Average = c(80, 18, 28, 87, 11, 22)
+)
+
+# Merge the two data frames
+comparison <- merge(model_averages, surveillance_averages, by = "Category")
+
+# Calculate numerical difference (Model - Surveillance)
+comparison$Numerical_Difference <- comparison$Model_Average - comparison$Surveillance_Average
+
+# Calculate percentage difference ((Model - Surveillance) / Surveillance * 100)
+comparison$Percentage_Difference <- round((comparison$Numerical_Difference / comparison$Surveillance_Average) * 100, 2)
+
+# Print the table
+print(comparison)
+```
+
+------------------------------------------------------------------------
+
+**Prevalence in each age sex/class**
+
+## Introduction
+
+This analyzes Chronic Wasting Disease (CWD) prevalence based on age/sex classes from simulation data from a model output for DPA 197 in minnesota . The analysis includes calculating prevalence rates for different age/sex classes, generating boxplots for each year, and combining them into a single multi-panel figure. A summary table of mean, median, and standard deviation of prevalence is also provided.
+
+### What the Plots Represent
+
+The plots are boxplots showing the distribution of CWD prevalence (proportion of infected individuals) for each age/sex class (e.g., AdultMale, YearlingFemale) across simulation iterations for a given year. The y-axis is log-scaled to handle low prevalence values. Boxplots display quartiles, with jittered points for individual non-zero prevalences and white circles for means. The combined figure allows comparison across years, highlighting trends like increasing prevalence or class-specific patterns over time.
+
+## Data Loading and Preparation
+
+This section loads the data and computes prevalence rates.
+
+```{r}
+# Load necessary libraries
+library(dplyr)
+library(readr)
+
+# Load the CSV file
+data <- read_csv("C:/Users/lrw0046/Downloads/cwdinfdyDPA197_seedinf_1.csv")
+```
+
+### This file contains simulation data with population and CWD counts for different deer classes per year and iteration.
+
+here is the calculation for shown prevalence as CWD count divided by population for each class, handling zero denominators.This chunk adds new columns for prevalence rates using mutate. The ifelse ensures no division by zero, setting prevalence to 0 if population is zero. This prepares the data for filtering and plotting.
+
+```{r}
+# Calculate prevalence by class per row
+data <- data %>%
+  mutate(
+    Prev_AdultMale = ifelse(AdultMale > 0, AdultMaleCWD / AdultMale, 0),
+    Prev_YearlingMale = ifelse(YearlingMale > 0, YearlingMaleCWD / YearlingMale, 0),
+    Prev_FawnMale = ifelse(FawnMale > 0, FawnMaleCWD / FawnMale, 0),
+    Prev_AdultFemale = ifelse(AdultFemale > 0, AdultFemaleCWD / AdultFemale, 0),
+    Prev_YearlingFemale = ifelse(YearlingFemale > 0, YearlingFemaleCWD / YearlingFemale, 0),
+    Prev_FawnFemale = ifelse(FawnFemale > 0, FawnFemaleCWD / FawnFemale, 0)
+  )
+```
+
+Filter out rows with zero total CWD to focus on meaningful data.We filter the data to include only rows where TotalCWD \> 0, as zero-CWD iterations don't contribute to prevalence analysis. This reduces noise in visualizations.
+
+```{r}
+# Exclude iterations with zero total CWD
+filtered_data <- data %>% filter(TotalCWD > 0)
+```
+
+## Data Reshaping for Plotting
+
+Reshape the data into long format for easier plotting with ggplot2. The data is moved to long format using pivot_longer, creating columns for 'Class' (e.g., AdultMale) and 'Prevalence'. clean the class names, set a factor order for consistent plotting, and replace zero prevalences with NA to avoid issues on log scales.
+
+```{r}
+# LONG format for plotting
+filtered_long <- filtered_data %>%
+  dplyr::select(Year, starts_with("Prev_")) %>%
+  pivot_longer(
+    cols = -Year,
+    names_to = "Class",
+    values_to = "Prevalence"
+  ) %>%
+  mutate(
+    Class = gsub("Prev_", "", Class)
+  )
+
+# Set class order
+class_order <- c("AdultMale", "YearlingMale", "FawnMale", "AdultFemale", "YearlingFemale", "FawnFemale")
+filtered_long$Class <- factor(filtered_long$Class, levels = class_order)
+
+# Replace zeros with NA for log scale plotting
+filtered_long <- filtered_long %>%
+  mutate(
+    Prevalence_plot = ifelse(Prevalence > 0, Prevalence, NA_real_)
+  )
+```
+
+Set up dynamic log breaks for the y-axis. This calculates dynamic breaks for the log-scaled y-axis based on the range of non-zero prevalence values. It ensures the axis labels are appropriate (e.g., 0.001%, 0.01%) and handles edge cases like all-zero data.
+
+```{r}
+# Dynamic log10 breaks
+eps <- 1e-6
+min_pos <- suppressWarnings(min(filtered_long$Prevalence_plot, na.rm = TRUE))
+min_pos <- ifelse(is.finite(min_pos), min_pos, eps)
+max_pos <- suppressWarnings(max(filtered_long$Prevalence_plot, na.rm = TRUE))
+max_pos <- ifelse(is.finite(max_pos) && max_pos > 0, max_pos, 1)
+lo_dec <- floor(log10(min_pos))
+hi_dec <- ceiling(log10(max_pos))
+log_breaks <- 10^(seq(lo_dec, hi_dec, by = 1))
+```
+
+## Generate Individual Plots
+
+Create a list of plots, one per year. This loop iterates over each unique year, filters the data, calculates class means, and generates a boxplot. Plots are stored in a list for later combination. No statistical annotations are added to keep is clean looking.
+
+```{r}
+# Get unique years
+unique_years <- sort(unique(filtered_long$Year))
+
+# List to store plots
+plot_list <- list()
+
+# Loop over each year and create separate plot (no stats)
+for (yr in unique_years) {
+  
+  # Filter data for this year
+  year_data <- filtered_long %>% filter(Year == yr)
+  
+  # Means per class for this year (use positive values)
+  summary_stats_year <- year_data %>%
+    group_by(Class) %>%
+    summarise(
+      mean_val = mean(Prevalence[Prevalence > 0], na.rm = TRUE),
+      .groups = "drop"
+    )
+  
+  # Compute max_y for positioning (no annotations, so minimal expansion)
+  max_y <- suppressWarnings(max(year_data$Prevalence_plot, na.rm = TRUE))
+  if (!is.finite(max_y)) max_y <- 1
+  
+  # Plot for this year (no stats)
+  p <- ggplot(
+    year_data,
+    aes(x = Class, y = Prevalence_plot, fill = Class)
+  ) +
+    geom_boxplot(
+      width = 0.5,
+      outlier.shape = NA,
+      alpha = 0.9,
+      color = "black",
+      linewidth = 0.3,
+      na.rm = TRUE
+    ) +
+    # Subtle jitter to visualize spread (skips zeros)
+    geom_point(
+      position = position_jitter(width = 0.2),
+      alpha = 0.20, size = 0.45, shape = 16, color = "black",
+      na.rm = TRUE
+    ) +
+    # Mean markers
+    geom_point(
+      data = summary_stats_year,
+      aes(x = Class, y = mean_val, group = Class),
+      size = 1.5, shape = 21, stroke = 0.35, fill = "white", color = "black",
+      inherit.aes = FALSE,
+      na.rm = TRUE
+    ) +
+    scale_fill_brewer(palette = "Set2") +
+    scale_y_log10(
+      breaks = log_breaks,
+      labels = scales::percent_format(accuracy = 0.001),
+      limits = c(max(eps, 10^lo_dec), max_y * 1.1)
+    ) +
+    labs(
+      title = paste("Year", yr),
+      x = "Age/Sex Class",
+      y = "Prevalence"
+    ) +
+    theme_minimal(base_size = 10) +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      panel.grid.minor = element_blank(),
+      legend.position = "none"  # Hide legend for individual plots
+    )
+  
+  plot_list[[as.character(yr)]] <- p
+}
+```
+
+Combine the plots into a single figure.
+
+```{r}
+# Combine all plots into one sheet (multi-panel figure)
+combined_plot <- grid.arrange(grobs = plot_list, ncol = 3, bottom = "Age/Sex Class", left = "Prevalence")  # Adjust ncol as needed for layout (e.g., 3 columns for ~5 rows)
+
+# Save the combined plot
+ggsave("combined_cwd_prevalence_plots.png", combined_plot, width = 15, height = 20, dpi = 300)  # Adjust dimensions as needed
+
+# Print the combined plot
+print(combined_plot)
+```
+
+## Summary Table
+
+Generate a summary table of prevalence statistics. This chunk groups data by year and class, computes mean, median, and SD (for non-zero prevalences), pivots to wide format for readability, and prints a table using kable. The table is saved as CSV.
+
+```{r}
+# Create summary table of mean, median, SD prevalences per year and class
+summary_table <- filtered_long %>%
+  group_by(Year, Class) %>%
+  summarise(
+    Mean_Prevalence = mean(Prevalence[Prevalence > 0], na.rm = TRUE),
+    Median_Prevalence = median(Prevalence[Prevalence > 0], na.rm = TRUE),
+    SD_Prevalence = sd(Prevalence[Prevalence > 0], na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  pivot_wider(
+    names_from = Class,
+    values_from = c(Mean_Prevalence, Median_Prevalence, SD_Prevalence),
+    values_fill = 0
+  )
+
+# Print the table nicely
+knitr::kable(summary_table, caption = "Summary Table of Prevalence Statistics by Year and Class")
+
+# Save the table as CSV
+write.csv(summary_table, "prevalence_summary_table.csv", row.names = FALSE)
+```
+
+## Results Interpretation
+
+results suggest CWD starts sporadically (non-significant tests, low effect sizes) but becomes structured over time, with higher prevalence in adults and males (significant tests, large d).
+
+The summary table from the model outputs for DPA 197 reveals a clear progression of CWD prevalence across the 15-year simulation period, with distinct patterns by age and sex classes. Overall, prevalence escalates from minimal levels in Year 1 (mostly below 0.001 across classes) to substantially higher rates by Year 15 (ranging from 0.015 to 0.043), indicating a compounding effect as the disease establishes itself in the modeled population.
+
+By age, adults exhibit the highest prevalence throughout, with AdultMale and AdultFemale means reaching 0.043 and 0.026 in Year 15, respectively, about 2–3 times those of fawns (FawnMale 0.015, FawnFemale 0.017). Yearlings fall in between, with means around 0.018 in later years. This difference (adults \> yearlings \> fawns) strengthens over time, as seen in the widening gaps: in Year 5, adult means are 2–4 times fawn means, but by Year 15, the ratio stabilizes at 2–3 times, showing age-related accumulation of infections.
+
+Sex differences are evident but more pronounced in adults, where males show higher means than females (e.g., Year 15 AdultMale 0.043 vs. AdultFemale 0.026). In yearlings and fawns, sex patterns are less consistent, with near-equality in yearlings (both \~0.018 in Year 15) and occasional female edges in fawns (FawnFemale 0.017 vs. FawnMale 0.015). Standard deviations parallel means, rising from near-zero in early years to 0.01–0.027 in Year 15, with adults displaying the greatest dispersion (e.g., AdultMale SD 0.027).
+
+------------------------------------------------------------------------
+
+# Prevalence Insights
+
+Code block written to determine out of intial outputs for model DPA 197, which iterations hit a prevalence of 1%, what year they hit 1% within those iterations, and for what year in those iterations that cwd was first detected.
+
+```{r}
+# Load the required libraries
+library(dplyr)
+
+# Read the data
+data <- read.csv("cwdinfdyDPA197_seedinf_1.csv")
+
+# Calculate true prevalence
+data <- data %>%
+  mutate(true_prevalence = TotalCWD / TotalPreHarvestPop)
+
+# Find iterations that reach at least 1% prevalence at any point
+iterations_to_keep <- data %>%
+  group_by(iteration) %>%
+  summarise(max_prev = max(true_prevalence, na.rm = TRUE)) %>%
+  filter(max_prev >= 0.01) %>%
+  pull(iteration)
+
+# Filter the data to only those iterations
+filtered_data <- data %>%
+  filter(iteration %in% iterations_to_keep)
+
+# For each iteration, find the first year where prevalence >= 1%
+first_prevalence_years <- filtered_data %>%
+  filter(true_prevalence >= 0.01) %>%
+  group_by(iteration) %>%
+  summarise(first_year_1pct = min(Year, na.rm = TRUE))
+
+# For each iteration, find the first year where DetProb hits 1 (assuming DetProb >= 1 indicates detection)
+first_detection_years <- filtered_data %>%
+  filter(DetProb >= 1) %>%
+  group_by(iteration) %>%
+  summarise(first_year_detected = min(Year, na.rm = TRUE))
+
+# Join the two data frames for the detection table
+detection_results <- first_prevalence_years %>%
+  left_join(first_detection_years, by = "iteration") %>%
+  arrange(iteration)
+
+# Display the detection results
+cat("Detection Table:\n")
+print(detection_results)
+
+
+# Join back to get the rows for those first years for the average testing
+first_year_rows <- filtered_data %>%
+  inner_join(first_prevalence_years, by = c("iteration", "Year" = "first_year_1pct"))
+
+# Calculate averages for each tested class and round to nearest whole number
+averages <- first_year_rows %>%
+  summarise(
+    `Adult Male` = round(mean(AdultMaleTested, na.rm = TRUE)),
+    `Yearling Male` = round(mean(YearlingMaleTested, na.rm = TRUE)),
+    `Fawn Male` = round(mean(FawnMaleTested, na.rm = TRUE)),
+    `Adult Female` = round(mean(AdultFemaleTested, na.rm = TRUE)),
+    `Yearling Female` = round(mean(YearlingFemaleTested, na.rm = TRUE)),
+    `Fawn Female` = round(mean(FawnFemaleTested, na.rm = TRUE))
+  )
+
+# To make it a table format, transpose it
+averages_table <- data.frame(
+  `Age/Sex Class` = names(averages),
+  `Average CWD Tested` = as.vector(t(averages))
+)
+
+# Display the average testing table
+cat("\nAverage Testing Table:\n")
+print(averages_table)
+
+
+```
+
+```         
+```
