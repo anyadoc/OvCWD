@@ -6,77 +6,6 @@ editor: visual
 
 ## MNPRO Notes
 
-1.  objective is to compare the deer that were sampled for CWD in leech lake and white earth to the model outputs.
-    1.  Link to sample done in leech lake and white earth -\><https://github.com/anyadoc/WELLOvCWD/blob/main/Deer%20Harvest%20and%20Population%20Reports/CWD%20Surveillance%20Data.csv>
-
-Summarized CWD testing for each age sex class from model outputs
-
-```{r}
-# Load necessary libraries
-library(readr)
-
-# Read the CSV file
-data <- read_csv("C:/Users/lrw0046/Downloads/cwdinfdyDPA197_seedinf_1.csv")
-
-# Calculate the average for each tested column and round to nearest whole number
-avg_adult_male_tested <- round(mean(data$AdultMaleTested, na.rm = TRUE))
-avg_yearling_male_tested <- round(mean(data$YearlingMaleTested, na.rm = TRUE))
-avg_fawn_male_tested <- round(mean(data$FawnMaleTested, na.rm = TRUE))
-avg_adult_female_tested <- round(mean(data$AdultFemaleTested, na.rm = TRUE))
-avg_yearling_female_tested <- round(mean(data$YearlingFemaleTested, na.rm = TRUE))
-avg_fawn_female_tested <- round(mean(data$FawnFemaleTested, na.rm = TRUE))
-
-# Create a data frame with the results
-results <- data.frame(
-  Category = c("Adult Male Tested", "Yearling Male Tested", "Fawn Male Tested",
-               "Adult Female Tested", "Yearling Female Tested", "Fawn Female Tested"),
-  Average = c(avg_adult_male_tested, avg_yearling_male_tested, avg_fawn_male_tested,
-              avg_adult_female_tested, avg_yearling_female_tested, avg_fawn_female_tested)
-)
-
-# Write the data frame to a CSV file
-write_csv(results, "C:/Users/lrw0046/Downloads/average_tested_deer_model.csv")
-
-print("average_tested_deer_model.csv")
-```
-
-**Compare average from model data to data provided by Tiffany**
-
--   Model average is referred to as Model_average and data provided by Tiffany is referred to as Surveillance_average in the table.
-
--   Differences are provided both numerically and percentage wise between model data and surveillance data
-
-```{r}
-# Load necessary library
-library(dplyr)
-
-# Hardcode the model averages from average_tested_deer.csv
-model_averages <- data.frame(
-  Category = c("Adult Male Tested", "Yearling Male Tested", "Fawn Male Tested",
-               "Adult Female Tested", "Yearling Female Tested", "Fawn Female Tested"),
-  Model_Average = c(50, 45, 3, 25, 14, 4)
-)
-
-# Hardcode the surveillance averages (calculated per year from the provided data)
-surveillance_averages <- data.frame(
-  Category = c("Adult Male Tested", "Yearling Male Tested", "Fawn Male Tested",
-               "Adult Female Tested", "Yearling Female Tested", "Fawn Female Tested"),
-  Surveillance_Average = c(80, 18, 28, 87, 11, 22)
-)
-
-# Merge the two data frames
-comparison <- merge(model_averages, surveillance_averages, by = "Category")
-
-# Calculate numerical difference (Model - Surveillance)
-comparison$Numerical_Difference <- comparison$Model_Average - comparison$Surveillance_Average
-
-# Calculate percentage difference ((Model - Surveillance) / Surveillance * 100)
-comparison$Percentage_Difference <- round((comparison$Numerical_Difference / comparison$Surveillance_Average) * 100, 2)
-
-# Print the table
-print(comparison)
-```
-
 ------------------------------------------------------------------------
 
 **Prevalence in each age sex/class**
@@ -152,9 +81,10 @@ filtered_long <- filtered_long %>%
   mutate(
     Prevalence_plot = ifelse(Prevalence > 0, Prevalence, NA_real_)
   )
+
 ```
 
-Set up dynamic log breaks for the y-axis. This calculates dynamic breaks for the log-scaled y-axis based on the range of non-zero prevalence values. It ensures the axis labels are appropriate (e.g., 0.001%, 0.01%) and handles edge cases like all-zero data.
+Set up dynamic log breaks for the y-axis. This calculates dynamic breaks for the log-scaled y-axis based on the range of non-zero prevalence values. It ensures the axis labels are appropriate (e.g., 0.001%, 0.01%) and handles edge cases like all-zero data. Calculate anova p-values per year.
 
 ```{r}
 # Dynamic log10 breaks
@@ -166,20 +96,14 @@ max_pos <- ifelse(is.finite(max_pos) && max_pos > 0, max_pos, 1)
 lo_dec <- floor(log10(min_pos))
 hi_dec <- ceiling(log10(max_pos))
 log_breaks <- 10^(seq(lo_dec, hi_dec, by = 1))
-```
 
-## Generate Individual Plots
-
-Create a list of plots, one per year. This loop iterates over each unique year, filters the data, calculates class means, and generates a boxplot. Plots are stored in a list for later combination. No statistical annotations are added to keep is clean looking.
-
-```{r}
 # Get unique years
 unique_years <- sort(unique(filtered_long$Year))
 
-# List to store plots
+# List to store individual plots with ANOVA p-values
 plot_list <- list()
 
-# Loop over each year and create separate plot (no stats)
+# Loop over each year and create separate plot with ANOVA p-value
 for (yr in unique_years) {
   
   # Filter data for this year
@@ -193,11 +117,29 @@ for (yr in unique_years) {
       .groups = "drop"
     )
   
-  # Compute max_y for positioning (no annotations, so minimal expansion)
+  # Compute max_y for positioning
   max_y <- suppressWarnings(max(year_data$Prevalence_plot, na.rm = TRUE))
   if (!is.finite(max_y)) max_y <- 1
   
-  # Plot for this year (no stats)
+  # Compute per-year ANOVA p-value (using log-transformed positive prevalences)
+  year_stats_data <- year_data %>%
+    filter(Prevalence > 0) %>%
+    mutate(log_prev = log10(Prevalence))
+  if (nrow(year_stats_data) > 0 && length(unique(year_stats_data$Class)) > 1) {
+    year_anova <- aov(log_prev ~ Class, data = year_stats_data)
+    p_val <- summary(year_anova)[[1]][["Pr(>F)"]][1]
+    p_label <- paste("ANOVA p =", format(p_val, digits = 3, scientific = TRUE))
+  } else {
+    p_label <- "ANOVA: Insufficient data"
+  }
+```
+
+## Generate Individual Plots
+
+Create a list of plots, one per year. This loop iterates over each unique year, filters the data, calculates class means, and generates a boxplot. Plots are stored in a list for later combination. No statistical annotations are added to keep is clean looking. Now includes anova stattistics for each year.
+
+```{r}
+  # Plot for this year with ANOVA annotation
   p <- ggplot(
     year_data,
     aes(x = Class, y = Prevalence_plot, fill = Class)
@@ -210,13 +152,11 @@ for (yr in unique_years) {
       linewidth = 0.3,
       na.rm = TRUE
     ) +
-    # Subtle jitter to visualize spread (skips zeros)
     geom_point(
       position = position_jitter(width = 0.2),
       alpha = 0.20, size = 0.45, shape = 16, color = "black",
       na.rm = TRUE
     ) +
-    # Mean markers
     geom_point(
       data = summary_stats_year,
       aes(x = Class, y = mean_val, group = Class),
@@ -235,11 +175,12 @@ for (yr in unique_years) {
       x = "Age/Sex Class",
       y = "Prevalence"
     ) +
+    annotate("text", x = Inf, y = Inf, label = p_label, hjust = 1.1, vjust = 1.1, size = 3, color = "red") +
     theme_minimal(base_size = 10) +
     theme(
       axis.text.x = element_text(angle = 45, hjust = 1),
       panel.grid.minor = element_blank(),
-      legend.position = "none"  # Hide legend for individual plots
+      legend.position = "none"
     )
   
   plot_list[[as.character(yr)]] <- p
@@ -249,41 +190,107 @@ for (yr in unique_years) {
 Combine the plots into a single figure.
 
 ```{r}
-# Combine all plots into one sheet (multi-panel figure)
-combined_plot <- grid.arrange(grobs = plot_list, ncol = 3, bottom = "Age/Sex Class", left = "Prevalence")  # Adjust ncol as needed for layout (e.g., 3 columns for ~5 rows)
+# Combine all individual plots into one multi-panel figure
+combined_plot <- grid.arrange(grobs = plot_list, ncol = 3, bottom = "Age/Sex Class", left = "Prevalence")
 
-# Save the combined plot
-ggsave("combined_cwd_prevalence_plots.png", combined_plot, width = 15, height = 20, dpi = 300)  # Adjust dimensions as needed
+# Save the combined individual plots
+ggsave("combined_cwd_prevalence_plots_with_stats.png", combined_plot, width = 15, height = 20, dpi = 300)
 
 # Print the combined plot
 print(combined_plot)
-```
 
-## Summary Table
+# Single plot with all years laid out together (x = Year, grouped boxplots by Class, no facets or stats annotation)
+singular_plot_data <- filtered_long %>%
+  mutate(Year = factor(Year))  # Treat Year as factor for grouping
 
-Generate a summary table of prevalence statistics. This chunk groups data by year and class, computes mean, median, and SD (for non-zero prevalences), pivots to wide format for readability, and prints a table using kable. The table is saved as CSV.
-
-```{r}
-# Create summary table of mean, median, SD prevalences per year and class
-summary_table <- filtered_long %>%
-  group_by(Year, Class) %>%
-  summarise(
-    Mean_Prevalence = mean(Prevalence[Prevalence > 0], na.rm = TRUE),
-    Median_Prevalence = median(Prevalence[Prevalence > 0], na.rm = TRUE),
-    SD_Prevalence = sd(Prevalence[Prevalence > 0], na.rm = TRUE),
-    .groups = "drop"
-  ) %>%
-  pivot_wider(
-    names_from = Class,
-    values_from = c(Mean_Prevalence, Median_Prevalence, SD_Prevalence),
-    values_fill = 0
+singular_plot <- ggplot(
+  singular_plot_data,
+  aes(x = Year, y = Prevalence_plot, fill = Class)
+) +
+  geom_boxplot(
+    position = position_dodge(width = 0.8),
+    width = 0.7,
+    outlier.shape = NA,
+    alpha = 0.9,
+    color = "black",
+    linewidth = 0.3,
+    na.rm = TRUE
+  ) +
+  geom_point(
+    position = position_jitterdodge(jitter.width = 0.2, dodge.width = 0.8),
+    alpha = 0.20, size = 0.45, shape = 16, color = "black",
+    na.rm = TRUE
+  ) +
+  # Add means (calculated per class and year)
+  geom_point(
+    data = filtered_long %>%
+      filter(Prevalence > 0) %>%
+      group_by(Year, Class) %>%
+      summarise(mean_val = mean(Prevalence, na.rm = TRUE), .groups = "drop"),
+    aes(x = factor(Year), y = mean_val, group = Class),
+    position = position_dodge(width = 0.8),
+    size = 1.5, shape = 21, stroke = 0.35, fill = "white", color = "black",
+    na.rm = TRUE
+  ) +
+  scale_fill_brewer(palette = "Set2") +
+  scale_y_log10(
+    breaks = log_breaks,
+    labels = scales::percent_format(accuracy = 0.001),
+    limits = c(max(eps, 10^lo_dec), max_pos * 1.1)
+  ) +
+  labs(
+    title = "CWD Prevalence by Year and Age/Sex Class",
+    x = "Year",
+    y = "Prevalence",
+    fill = "Age/Sex Class"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid.minor = element_blank(),
+    legend.position = "bottom"
   )
 
-# Print the table nicely
-knitr::kable(summary_table, caption = "Summary Table of Prevalence Statistics by Year and Class")
+# Save the singular plot
+ggsave("singular_cwd_prevalence_plot.png", singular_plot, width = 15, height = 8, dpi = 300)
 
-# Save the table as CSV
-write.csv(summary_table, "prevalence_summary_table.csv", row.names = FALSE)
+# Print the singular plot
+print(singular_plot)
+```
+
+## Summary results
+
+Generate a summary table of prevalence statistics.
+
+```{r}
+# Per-year ANOVA for Excel
+stats_data <- filtered_long %>%
+  filter(Prevalence > 0) %>%
+  mutate(log_prev = log10(Prevalence))
+
+per_year_anova <- stats_data %>%
+  group_by(Year) %>%
+  do(anova = tidy(aov(log_prev ~ Class, data = .))) %>%
+  unnest(anova)
+
+# Overall ANOVA tidy
+overall_anova <- aov(log_prev ~ Class * Year, data = stats_data)
+overall_anova_tidy <- tidy(overall_anova)
+
+# Combine results for Excel
+stats_list <- list(
+  Overall_ANOVA = overall_anova_tidy,
+  Per_Year_ANOVA = per_year_anova
+)
+
+# Write to Excel file
+write_excel_csv(stats_list, "statistical_tests_results.csv")
+
+# Print summaries (for console)
+print("Overall ANOVA Summary:")
+print(overall_anova_tidy)
+print("Per-Year ANOVA Summaries:")
+print(per_year_anova)
 ```
 
 ## Results Interpretation
@@ -375,4 +382,194 @@ print(averages_table)
 ```
 
 ```         
+```
+
+------------------------------------------------------------------------
+
+### Comparison Outputs
+
+1.  objective is to compare the deer that were sampled for CWD in leech lake and white earth to the model outputs.
+    1.  Link to sample done in leech lake and white earth -\><https://github.com/anyadoc/WELLOvCWD/blob/main/Deer%20Harvest%20and%20Population%20Reports/CWD%20Surveillance%20Data.csv>
+
+**Compare average from model data to data provided by Tiffany**
+
+-   Model average is referred to as Model_average and data provided by Tiffany is referred to as Surveillance_average in the table.
+
+-   Differences are provided both numerically and percentage wise between model data and surveillance data
+
+```{r}
+library(readr)
+library(dplyr)
+library(writexl)
+
+# Read the model output CSV files
+model197 <- read_csv("cwdinfdyDPA197_seedinf_1.csv")
+model297 <- read_csv("cwdinfdyDPA297298_seedinf_1.csv")
+
+# Compute average annual tested for each age/sex class in the models
+model197_avg <- model197 %>%
+  summarise(
+    AdultMale = mean(AdultMaleTested, na.rm = TRUE),
+    YearlingMale = mean(YearlingMaleTested, na.rm = TRUE),
+    FawnMale = mean(FawnMaleTested, na.rm = TRUE),
+    AdultFemale = mean(AdultFemaleTested, na.rm = TRUE),
+    YearlingFemale = mean(YearlingFemaleTested, na.rm = TRUE),
+    FawnFemale = mean(FawnFemaleTested, na.rm = TRUE)
+  )
+
+model297_avg <- model297 %>%
+  summarise(
+    AdultMale = mean(AdultMaleTested, na.rm = TRUE),
+    YearlingMale = mean(YearlingMaleTested, na.rm = TRUE),
+    FawnMale = mean(FawnMaleTested, na.rm = TRUE),
+    AdultFemale = mean(AdultFemaleTested, na.rm = TRUE),
+    YearlingFemale = mean(YearlingFemaleTested, na.rm = TRUE),
+    FawnFemale = mean(FawnFemaleTested, na.rm = TRUE)
+  )
+
+# Hardcoded average annual surveillance data (total over 4 years / 4)
+# For Leech Lake (DPA 197)
+surv_avg197 <- c(
+  AdultMale = 139 / 4,
+  YearlingMale = 55 / 4,
+  FawnMale = 83 / 4,
+  AdultFemale = 229 / 4,
+  YearlingFemale = 37 / 4,
+  FawnFemale = 69 / 4
+)
+
+# For White Earth (DPA 297/298)
+surv_avg297 <- c(
+  AdultMale = 182 / 4,
+  YearlingMale = 18 / 4,
+  FawnMale = 27 / 4,
+  AdultFemale = 120 / 4,
+  YearlingFemale = 7 / 4,
+  FawnFemale = 20 / 4
+)
+
+# Classes for dataframe
+classes <- c("Adult Male", "Yearling Male", "Fawn Male", "Adult Female", "Yearling Female", "Fawn Female")
+
+# Create dataframes for surveillance averages
+surv_df197 <- data.frame(
+  Class = classes,
+  Surveillance_Avg = surv_avg197
+)
+
+surv_df297 <- data.frame(
+  Class = classes,
+  Surveillance_Avg = surv_avg297
+)
+
+# Create dataframes for model averages (transposed to match format)
+model_df197 <- data.frame(
+  Class = classes,
+  Model_Avg = c(model197_avg$AdultMale, model197_avg$YearlingMale, model197_avg$FawnMale,
+                model197_avg$AdultFemale, model197_avg$YearlingFemale, model197_avg$FawnFemale)
+)
+
+model_df297 <- data.frame(
+  Class = classes,
+  Model_Avg = c(model297_avg$AdultMale, model297_avg$YearlingMale, model297_avg$FawnMale,
+                model297_avg$AdultFemale, model297_avg$YearlingFemale, model297_avg$FawnFemale)
+)
+
+# Compute comparisons for DPA 197
+comparison197 <- data.frame(
+  Class = classes,
+  Model_Avg = model_df197$Model_Avg,
+  Surveillance_Avg = surv_df197$Surveillance_Avg,
+  Numerical_Difference = model_df197$Model_Avg - surv_df197$Surveillance_Avg,
+  Percentage_Difference = ((model_df197$Model_Avg - surv_df197$Surveillance_Avg) / surv_df197$Surveillance_Avg) * 100
+)
+
+# Compute comparisons for DPA 297/298
+comparison297 <- data.frame(
+  Class = classes,
+  Model_Avg = model_df297$Model_Avg,
+  Surveillance_Avg = surv_df297$Surveillance_Avg,
+  Numerical_Difference = model_df297$Model_Avg - surv_df297$Surveillance_Avg,
+  Percentage_Difference = ((model_df297$Model_Avg - surv_df297$Surveillance_Avg) / surv_df297$Surveillance_Avg) * 100
+)
+
+# Write to Excel file
+write_xlsx(
+  list(
+    "Model_Outputs_DPA197" = model_df197,
+    "Model_Outputs_DPA297298" = model_df297,
+    "MN_Surveillance_DPA197" = surv_df197,
+    "MN_Surveillance_DPA297298" = surv_df297,
+    "Comparisons_DPA197" = comparison197,
+    "Comparisons_DPA297298" = comparison297
+  ),
+  "cwd_comparison_output.xlsx"
+)
+```
+
+------------------------------------------------------------------------
+
+Code Block to determine the number of rows within the intial model outputs that contain prevelances .5%, 1%, 2%, 3%, 4%, 5%, prevelances are within a .1 range of the specified prevelaces percantages. Prevealnces are true prevelances calculated by dividing total cwd / total preharvest pop.
+
+```{r}
+library(readr)
+library(dplyr)
+library(writexl)
+library(ggplot2)
+# Read the CSV files
+dpa197 <- read_csv("cwdinfdyDPA197_seedinf_1.csv")
+dpa297 <- read_csv("cwdinfdyDPA297298_seedinf_1.csv")
+# Calculate true prevalence in percentage and add DPA label
+dpa197 <- dpa197 %>%
+  mutate(true_prev = (TotalCWD / TotalPreHarvestPop) * 100,
+         DPA = "DPA197")
+dpa297 <- dpa297 %>%
+  mutate(true_prev = (TotalCWD / TotalPreHarvestPop) * 100,
+         DPA = "DPA297")
+# Combine the datasets
+combined_df <- bind_rows(dpa197, dpa297)
+# Define the target prevalences
+targets <- c(0.5, 1.0, 2.0, 3.0, 4.0, 5.0)
+# Function to assign target prevalence bin if within ±0.1%
+assign_bin <- function(prev, targets) {
+  for (t in targets) {
+    if (prev >= (t - 0.1) & prev <= (t + 0.1)) {
+      return(t)
+    }
+  }
+  return(NA)
+}
+# Apply the bin assignment
+combined_df <- combined_df %>%
+  rowwise() %>%
+  mutate(Target_Prevalence = assign_bin(true_prev, targets)) %>%
+  ungroup() %>%
+  filter(!is.na(Target_Prevalence)) # Filter to only rows in a bin
+# Write the combined and filtered data to a CSV file
+write_csv(combined_df, "combined_prevalence_data.csv")
+# Create a static violin plot using ggplot2 with clean aesthetics, grouped by target
+p <- ggplot(combined_df, aes(x = factor(Target_Prevalence), y = true_prev, fill = DPA)) +
+  geom_violin(trim = FALSE, alpha = 0.6, linewidth = 0.5, position = position_dodge(0.9)) + # Dodged for grouping
+  scale_fill_manual(values = c("DPA197" = "#1f77b4", "DPA297" = "#2ca02c")) +
+  labs(title = "Violin Plots of True Prevalence Within ±0.1% of Each Target",
+       x = "Target Prevalence (%)",
+       y = "True Prevalence (%)",
+       fill = "DPA Group") +
+  theme_minimal(base_size = 14) + # Clean minimal theme
+  theme(plot.title = element_text(size = 18, face = "bold", hjust = 0.5),
+        axis.title = element_text(size = 14),
+        axis.text = element_text(size = 12),
+        legend.title = element_text(size = 12),
+        legend.text = element_text(size = 11),
+        legend.position = "bottom", # Horizontal legend below
+        panel.grid.major = element_line(color = "#e0e0e0"),
+        panel.grid.minor = element_blank(),
+        plot.margin = margin(10, 10, 20, 10)) +
+  coord_cartesian(ylim = c(0, NA)) # Ensure y starts at 0, expandable upward
+# Optionally overlay narrow box plots for quartiles (uncomment to enable)
+# p <- p + geom_boxplot(width = 0.1, fill = "white", color = "black", outlier.shape = NA, position = position_dodge(0.9))
+# Display the plot
+print(p)
+# To save as PNG (high resolution)
+ggsave("prevalence_target_violin_static.png", p, width = 10, height = 6, dpi = 300)
 ```
